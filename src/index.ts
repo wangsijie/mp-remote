@@ -129,6 +129,7 @@ export const login = async (): Promise<string | null> => {
     return null;
   } else {
     store.token = res.token;
+    store.user = res.user;
     logining = false;
     return res.token;
   }
@@ -145,6 +146,8 @@ export const getToken = async () => {
   }
   return token;
 }
+
+export const getUserInfo = () => store.user;
 
 export const getUploadUrl = async (url: string) => `${REMOTE_ROOT}${url}`;
 export const getUploadUrlSync = (url: string) => `${REMOTE_ROOT}${url}`;
