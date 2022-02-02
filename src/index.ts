@@ -171,5 +171,5 @@ export const uploadImage = async (endpoint: string) => {
   return responses;
 };
 
-export const useSWR = async (url: string) =>
+export const useSWR = (url: string) =>
   useSWROrigin(url, (url) => request({ url }));
