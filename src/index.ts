@@ -1,6 +1,7 @@
-import Taro from '@tarojs/taro';
-import store from './store';
-import { pushLoading, popLoading } from './loading';
+import Taro from "@tarojs/taro";
+import useSWROrigin from "swr";
+import store from "./store";
+import { pushLoading, popLoading } from "./loading";
 
 let REMOTE_ROOT: string;
 
@@ -9,131 +10,107 @@ export function setRemoteRoot(root: string) {
 }
 
 interface RequestOptions {
-  endpoint?: string;
-  query?: { [key: string]: any };
-  data?: { [key: string]: any };
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  throwException?: boolean | 'show-message';
-  loading?: boolean;
-  instantLoading?: boolean;
+  url?: string;
+  params?: { [key: string]: string };
+  data?: { [key: string]: unknown };
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  spinner?: boolean;
+  lazySpinner?: boolean;
+  errorModal?: boolean;
 }
 
-export async function request({
-  endpoint = '',
-  query = {},
+export async function request<T>({
+  url = "",
+  params = {},
   data,
-  method = 'GET',
-  throwException = false,
-  loading = true,
-  instantLoading = false
-}: RequestOptions) {
+  method = "GET",
+  spinner = true,
+  lazySpinner = true,
+  errorModal = true,
+}: RequestOptions): Promise<T> {
   try {
-    let url = `${REMOTE_ROOT}${endpoint}`;
-    const noTokenPrefixes = [
-      '/users/login',
-    ];
+    const noTokenPrefixes = ["/login"];
     const header: { [key: string]: any } = {};
-    if (!noTokenPrefixes.reduce((p, prefix) => p || endpoint.indexOf(prefix) > -1, false)) {
-      header.Authorization = `bearer ${await getToken()}`;
+    if (
+      !noTokenPrefixes.reduce(
+        (p, prefix) => p || url.indexOf(prefix) > -1,
+        false
+      )
+    ) {
+      const token = await getToken();
+      if (!token) {
+        throw new Error("Unable to get token");
+      }
+      header.Authorization = `bearer ${token}`;
     }
-    Object.keys(query).forEach((key, index) => {
-      const value = query[key];
-      url += (index === 0 ? '?' : '&') + `${key}=${value}`;
+    Object.keys(params).forEach((key, index) => {
+      const value = params[key];
+      url += (index === 0 ? "?" : "&") + `${key}=${value}`;
     });
-    if (loading) {
-      pushLoading(instantLoading);
+    if (spinner) {
+      pushLoading(!lazySpinner);
     }
     const response = await Taro.request({
-      url,
-      dataType: 'json',
+      url: `${REMOTE_ROOT}${url}`,
+      dataType: "json",
       data,
       header,
-      method
+      method,
     });
-    if (loading) {
+    if (spinner) {
       popLoading();
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      let message = response.data.message;
-      if (!message && response.statusCode === 404) {
-        message = '未找到';
-      }
+      const message =
+        response.statusCode === 404 && !response.data.message
+          ? "未找到"
+          : response.data.message;
       throw new Error(message);
     }
     return response.data;
   } catch (e) {
-    if (loading) {
+    if (spinner) {
       popLoading();
     }
-    if (throwException === true) {
-      throw e;
-    } else if (throwException === 'show-message') {
+    if (e instanceof Error && errorModal) {
       Taro.showModal({
         title: `错误`,
-        content: e.message,
+        content: e.message || "网络连接失败",
         showCancel: false,
-        confirmText: '好'
-      });
-      throw e;
-    } else {
-      Taro.showModal({
-          title: `错误`,
-          content: e.message || '网络连接失败',
-          showCancel: false,
-          confirmText: '好'
+        confirmText: "好",
       });
     }
+    throw e;
   }
 }
 
-export function $get(endpoint: string, query = {}, options: RequestOptions = {}) {
-  options.endpoint = endpoint;
-  options.query = query;
-  options.method = 'GET';
-  return request(options);
-}
-export function $post(endpoint: string, data = {}, options: RequestOptions = {}) {
-  options.endpoint = endpoint;
-  options.data = data;
-  options.method = 'POST';
-  return request(options);
-}
-export function $put(endpoint: string, data = {}, options: RequestOptions = {}) {
-  options.endpoint = endpoint;
-  options.data = data;
-  options.method = 'PUT';
-  return request(options);
-}
-export function $delete(endpoint: string, data = {}, options: RequestOptions = {}) {
-  options.endpoint = endpoint;
-  options.data = data;
-  options.method = 'DELETE';
-  return request(options);
-}
-
-let logining: boolean = false
-export const login = async (): Promise<string | null> => {
+let logining: boolean = false;
+export const login = async (): Promise<string> => {
   if (logining) {
     if (store.token) {
       return store.token;
     } else {
       return new Promise((resolve) => {
         setTimeout(() => login().then(resolve), 100);
-      })
+      });
     }
   }
   logining = true;
   const { code } = await Taro.login();
-  const res = await $post('/users/login', { code });
-  if (!res || !res.token) {
-    return null;
+  const data = await request<{ token: string; user: unknown }>({
+    url: "/login",
+    method: "POST",
+    data: { code },
+  });
+  if (!data?.token) {
+    throw new Error("Login error, missing `token` in response");
   } else {
-    store.token = res.token;
-    store.user = res.user;
+    store.token = data.token;
+    store.user = data.user;
     logining = false;
-    return res.token;
+    return data.token;
   }
-}
+};
 
 export const getToken = async () => {
   if (store.token) {
@@ -142,34 +119,33 @@ export const getToken = async () => {
   const token = await login();
   if (!token) {
     // 抛出异常，阻止本次请求
-    throw new Error();
+    throw new Error("Unable to get token");
   }
   return token;
-}
+};
 
 export const getUserInfo = () => store.user;
 
-export const getUploadUrl = async (url: string) => `${REMOTE_ROOT}${url}`;
-export const getUploadUrlSync = (url: string) => `${REMOTE_ROOT}${url}`;
+export const getUploadUrl = (url: string) => `${REMOTE_ROOT}${url}`;
 
 export const uploadFile = async (endpoint: string, filePath: string) => {
-  const url = await getUploadUrl(endpoint);
+  const url = getUploadUrl(endpoint);
   const token = await getToken();
   return new Promise((resolve, reject) => {
     Taro.uploadFile({
       url,
       filePath,
-      name: 'file',
+      name: "file",
       header: {
         Authorization: `Bearer ${token}`,
       },
       success(response) {
-        resolve(JSON.parse(response.data))
+        resolve(JSON.parse(response.data));
       },
-      fail: reject
+      fail: reject,
     });
-  })
-}
+  });
+};
 
 export const uploadImage = async (endpoint: string) => {
   const filePaths: string[] = await new Promise((resolve, reject) => {
@@ -182,9 +158,9 @@ export const uploadImage = async (endpoint: string) => {
     });
   });
   Taro.showToast({
-    title: '正在上传',
-    icon: 'loading',
-    duration: 60000
+    title: "正在上传",
+    icon: "loading",
+    duration: 60000,
   });
   const responses = [];
   for (const filePath of filePaths) {
@@ -193,4 +169,7 @@ export const uploadImage = async (endpoint: string) => {
   }
   Taro.hideToast();
   return responses;
-}
+};
+
+export const useSWR = async (url: string) =>
+  useSWROrigin(url, (url) => request({ url }));
