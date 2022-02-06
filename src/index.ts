@@ -86,14 +86,13 @@ export async function request<T>({
 
 let logining: boolean = false;
 export const login = async (): Promise<string> => {
+  if (store.token) {
+    return store.token;
+  }
   if (logining) {
-    if (store.token) {
-      return store.token;
-    } else {
-      return new Promise((resolve) => {
-        setTimeout(() => login().then(resolve), 100);
-      });
-    }
+    return new Promise((resolve) => {
+      setTimeout(() => login().then(resolve), 100);
+    });
   }
   logining = true;
   const { code } = await Taro.login();
