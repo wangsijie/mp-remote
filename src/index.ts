@@ -2,6 +2,7 @@ import Taro from "@tarojs/taro";
 import useSWROrigin from "swr";
 import store from "./store";
 import { pushLoading, popLoading } from "./loading";
+import { safeParseJson } from "./utils";
 
 let REMOTE_ROOT: string;
 
@@ -139,7 +140,19 @@ export const uploadFile = async (endpoint: string, filePath: string) => {
         Authorization: `Bearer ${token}`,
       },
       success(response) {
-        resolve(JSON.parse(response.data));
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          const responseData = safeParseJson(response.data);
+          const message = responseData ? responseData.message : "上传失败";
+          Taro.showModal({
+            title: `错误`,
+            content: message,
+            showCancel: false,
+            confirmText: "好",
+          });
+          reject(new Error(message));
+          return;
+        }
+        resolve(safeParseJson(response.data) || response.data);
       },
       fail: reject,
     });
